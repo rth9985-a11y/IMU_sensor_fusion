@@ -95,5 +95,5 @@ void loop()
     Serial.println(sensor_data.gyr.z);
   }
 
-  delay(5); // ~200 Hz
+  delay(1); // ~200 Hz
 }
