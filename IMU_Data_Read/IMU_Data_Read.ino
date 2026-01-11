@@ -1,5 +1,6 @@
 #include <Wire.h>
 #include "bmi270.h"
+#include "LPF.h"
 
 #define BMI270_I2C_ADDR 0x68
 /*Can also be replaced with "contexpr byte BMI270_I2C_ADDR = 0x68" macros outdated for this use case???*/
