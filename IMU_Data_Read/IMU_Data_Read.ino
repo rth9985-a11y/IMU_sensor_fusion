@@ -40,21 +40,31 @@ int8_t bmi2_i2c_write(uint8_t reg, const uint8_t *data, uint32_t len, void *intf
   return (Wire2.endTransmission() == 0) ? BMI2_OK : BMI2_E_COM_FAIL;
 }
 
-void bmi2_delay_us(uint32_t period, void *intf_ptr)
+// THIS DOESN'T COMPILE, FIX THIS SOON!!!!!!!!!
+void bmi2_delay_us(uint32_t period_us, void *intf_ptr)
 {
-  delayMicroseconds(period);
+  (void) intf_ptr;
+  delayMicroseconds(period_us);
 }
 
 /*Bosch objects*/
 struct bmi2_dev bmi;
 struct bmi2_sens_data sensor_data;
 
+/*Init LFP class*/
+ButterworthLPF accX_LPF;
+ButterworthLPF accY_LPF;
+ButterworthLPF accZ_LPF;
+
+ButterworthLPF gyrX_LPF;
+ButterworthLPF gyrY_LPF;
+ButterworthLPF gyrZ_LPF;
+
 /*Teensy Init*/
 void setup()
 {
-  Serial.begin(115200);
-  while (!Serial)
-    ;
+  Serial.begin(921600);
+  while (!Serial);
 
   Serial.println("t_us,ax,ay,az,gx,gy,gz");
 
@@ -70,19 +80,38 @@ void setup()
   if (bmi270_init(&bmi) != BMI2_OK)
   {
     Serial.println("BMI270 init failed");
-    while (1)
-      ;
+    while (1);
   }
 
   uint8_t sens_list[2] = {BMI2_ACCEL, BMI2_GYRO};
   bmi270_sensor_enable(sens_list, 2, &bmi);
+
+  float accFc = 10.0;
+  float gyrFc = 5.0;
+
+  initButterworthLPF(&accX_LPF, accFc, 200.0f);
+  initButterworthLPF(&accY_LPF, accFc, 200.0f);
+  initButterworthLPF(&accZ_LPF, accFc, 200.0f);
+
+  initButterworthLPF(&gyrX_LPF, gyrFc, 200.0f);
+  initButterworthLPF(&gyrY_LPF, gyrFc, 200.0f);
+  initButterworthLPF(&gyrZ_LPF, gyrFc, 200.0f);
 }
 
 /*Get Data*/
 void loop()
 {
-  if (bmi2_get_sensor_data(&sensor_data, &bmi) == BMI2_OK)
-  {
+  if (bmi2_get_sensor_data(&sensor_data, &bmi) == BMI2_OK){
+
+    float accX = processButterworthLPF(&accX_LPF, sensor_data.acc.x);
+    float accY = processButterworthLPF(&accY_LPF, sensor_data.acc.y);
+    float accZ = processButterworthLPF(&accZ_LPF, sensor_data.acc.z);
+
+    float gyrX = processButterworthLPF(&gyrX_LPF, sensor_data.gyr.x);
+    float gyrY = processButterworthLPF(&gyrY_LPF, sensor_data.gyr.y);
+    float gyrZ = processButterworthLPF(&gyrZ_LPF, sensor_data.gyr.z);
+
+    /* Use for raw data only
     Serial.print(sensor_data.acc.x);
     Serial.print(",");
     Serial.print(sensor_data.acc.y);
@@ -94,7 +123,19 @@ void loop()
     Serial.print(sensor_data.gyr.y);
     Serial.print(",");
     Serial.println(sensor_data.gyr.z);
+    */
+    Serial.print(accX);
+    Serial.print(",");
+    Serial.print(accY);
+    Serial.print(",");
+    Serial.print(accZ);
+    Serial.print(",");
+    Serial.print(gyrX);
+    Serial.print(",");
+    Serial.print(gyrY);
+    Serial.print(",");
+    Serial.println(gyrZ);
   }
 
-  delay(1); // ~200 Hz
+  delay(5); //200hz
 }

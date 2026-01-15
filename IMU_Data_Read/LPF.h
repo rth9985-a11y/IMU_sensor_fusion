@@ -1,4 +1,4 @@
-#indef LPF_H
+#ifndef LPF_H
 #define LPF_H
 
 struct ButterworthLPF{
@@ -8,12 +8,12 @@ struct ButterworthLPF{
   float a1, a2;
 
   // States and current inputs
-  float x1, x2
-  float y1, y2
+  float x1, x2;
+  float y1, y2;
 
 };
 
-void initButterworthLPF(ButterworthLPF* f, float cutoff, float fs);
+void initButterworthLPF(ButterworthLPF* f, float fcHz, float fs);
 
 float processButterworthLPF(ButterworthLPF* f, float x);
 
