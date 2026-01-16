@@ -61,14 +61,20 @@ ButterworthLPF gyrX_LPF;
 ButterworthLPF gyrY_LPF;
 ButterworthLPF gyrZ_LPF;
 
+// dt last time variable
+unsigned long prev_time = 0;
+
+// Gyro States
+float gyr_pitch = 0;
+float gyr_roll = 0;
+float gyr_yaw = 0;
+
 /*Teensy Init*/
 void setup()
 {
   Serial.begin(921600);
   while (!Serial);
-
   Serial.println("t_us,ax,ay,az,gx,gy,gz");
-
   Wire2.begin();
   Wire2.setClock(400000);
 
@@ -105,6 +111,7 @@ void setup()
   uint8_t sens_list[2] = {BMI2_ACCEL, BMI2_GYRO};
   bmi270_sensor_enable(sens_list, 2, &bmi);
 
+  // Low pass filtering
   float accFc = 10.0;
   float gyrFc = 5.0;
 
@@ -116,6 +123,9 @@ void setup()
   initButterworthLPF(&gyrY_LPF, gyrFc, 200.0f);
   initButterworthLPF(&gyrZ_LPF, gyrFc, 200.0f);
 
+  // Prev time init
+  prev_time = micros();
+
 }
 
 /*Get Data*/
@@ -123,14 +133,19 @@ void loop()
 {
   if (bmi2_get_sensor_data(&sensor_data, &bmi) == BMI2_OK){
 
-    // 32768 = 18 bit signed int
+    //dt calculation
+    unsigned long current_time = micros();
+    float dt = (current_time - prev_time) * 1e-6;
+    prev_time = current_time;
+
+    // 32768 = 16 bit signed int
     float g_per_lsb = 4.0f / 32768.0f;      
     float dps_per_lsb = 500.0f / 32768.0f;
 
+    //Get raw data and convert to Gs for accel and deg./sec. 
     float ax = sensor_data.acc.x * g_per_lsb;
     float ay = sensor_data.acc.y * g_per_lsb;
     float az = sensor_data.acc.z * g_per_lsb;
-
     float gx = sensor_data.gyr.x * dps_per_lsb;
     float gy = sensor_data.gyr.y * dps_per_lsb;
     float gz = sensor_data.gyr.z * dps_per_lsb;
@@ -138,10 +153,21 @@ void loop()
     float accX = processButterworthLPF(&accX_LPF, ax);
     float accY = processButterworthLPF(&accY_LPF, ay);
     float accZ = processButterworthLPF(&accZ_LPF, az);
-
     float gyrX = processButterworthLPF(&gyrX_LPF, gx);
     float gyrY = processButterworthLPF(&gyrY_LPF, gy);
     float gyrZ = processButterworthLPF(&gyrZ_LPF, gz);
+
+    //Accel to pitch and roll instead of raw Gs 
+    float roll = atan2(accX, accZ);
+    float pitch = atan2(-accX, sqrtf((accY * accY) + (accZ * accZ)));
+
+    float roll_degrees = roll * (180/M_PI);
+    float pitch_degrees = pitch * (180/M_PI);
+
+    // Integrate gyro data 
+    gyr_roll += gyrX * dt;
+    gyr_pitch += gyrY * dt;
+    gyr_yaw += gyrZ * dt;
 
     /* Use for raw data only
     Serial.print(sensor_data.acc.x);
@@ -157,22 +183,15 @@ void loop()
     Serial.println(sensor_data.gyr.z);
     */
 
-    float roll = atan2(accX, accZ);
-    float pitch = atan2(-accX, sqrtf((accY * accY) + (accZ * accZ)));
-
-    float roll_degrees = roll * (180/M_PI);
-    float pitch_degrees = pitch * (180/M_PI);
-
-
     Serial.print(roll_degrees);
     Serial.print(",");
     Serial.print(pitch_degrees);
     Serial.print(",");
-    Serial.print(gyrX);
+    Serial.print(gyr_pitch);  // Check python for variables / change them to pitch, roll, yaw
     Serial.print(",");
-    Serial.print(gyrY);
+    Serial.print(gyr_roll);
     Serial.print(",");
-    Serial.println(gyrZ);
+    Serial.println(gyr_yaw);
   }
 
   delay(5); //200hz
