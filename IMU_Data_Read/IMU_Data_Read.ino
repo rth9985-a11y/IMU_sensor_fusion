@@ -1,6 +1,7 @@
 #include <Wire.h>
 #include "bmi270.h"
 #include "LPF.h"
+#include <cmath>
 
 #define BMI270_I2C_ADDR 0x68
 /*Can also be replaced with "contexpr byte BMI270_I2C_ADDR = 0x68" macros outdated for this use case???*/
@@ -83,6 +84,24 @@ void setup()
     while (1);
   }
 
+  // BMI270 API sensor config init
+  struct bmi2_sens_config sens_conf;
+
+  // Accel range
+  sens_conf.type = BMI2_ACCEL;
+  sens_conf.cfg.acc.range = BMI2_ACC_RANGE_4G; // 4g range
+  sens_conf.cfg.acc.odr = 200; 
+  sens_conf.cfg.acc.bwp = BMI2_ACC_OSR4_AVG1;
+  bmi2_set_sensor_config(&sens_conf, 1, &bmi);
+
+  // Gyro range
+  sens_conf.type = BMI2_GYRO;
+  sens_conf.cfg.gyr.range = BMI2_GYR_RANGE_500; 
+  sens_conf.cfg.gyr.odr = 200;
+  sens_conf.cfg.gyr.bwp = BMI2_GYR_NORMAL_MODE;
+  bmi2_set_sensor_config(&sens_conf, 1, &bmi);
+
+
   uint8_t sens_list[2] = {BMI2_ACCEL, BMI2_GYRO};
   bmi270_sensor_enable(sens_list, 2, &bmi);
 
@@ -96,6 +115,7 @@ void setup()
   initButterworthLPF(&gyrX_LPF, gyrFc, 200.0f);
   initButterworthLPF(&gyrY_LPF, gyrFc, 200.0f);
   initButterworthLPF(&gyrZ_LPF, gyrFc, 200.0f);
+
 }
 
 /*Get Data*/
@@ -103,13 +123,25 @@ void loop()
 {
   if (bmi2_get_sensor_data(&sensor_data, &bmi) == BMI2_OK){
 
-    float accX = processButterworthLPF(&accX_LPF, sensor_data.acc.x);
-    float accY = processButterworthLPF(&accY_LPF, sensor_data.acc.y);
-    float accZ = processButterworthLPF(&accZ_LPF, sensor_data.acc.z);
+    // 32768 = 18 bit signed int
+    float g_per_lsb = 4.0f / 32768.0f;      
+    float dps_per_lsb = 500.0f / 32768.0f;
 
-    float gyrX = processButterworthLPF(&gyrX_LPF, sensor_data.gyr.x);
-    float gyrY = processButterworthLPF(&gyrY_LPF, sensor_data.gyr.y);
-    float gyrZ = processButterworthLPF(&gyrZ_LPF, sensor_data.gyr.z);
+    float ax = sensor_data.acc.x * g_per_lsb;
+    float ay = sensor_data.acc.y * g_per_lsb;
+    float az = sensor_data.acc.z * g_per_lsb;
+
+    float gx = sensor_data.gyr.x * dps_per_lsb;
+    float gy = sensor_data.gyr.y * dps_per_lsb;
+    float gz = sensor_data.gyr.z * dps_per_lsb;
+
+    float accX = processButterworthLPF(&accX_LPF, ax);
+    float accY = processButterworthLPF(&accY_LPF, ay);
+    float accZ = processButterworthLPF(&accZ_LPF, az);
+
+    float gyrX = processButterworthLPF(&gyrX_LPF, gx);
+    float gyrY = processButterworthLPF(&gyrY_LPF, gy);
+    float gyrZ = processButterworthLPF(&gyrZ_LPF, gz);
 
     /* Use for raw data only
     Serial.print(sensor_data.acc.x);
@@ -124,11 +156,17 @@ void loop()
     Serial.print(",");
     Serial.println(sensor_data.gyr.z);
     */
-    Serial.print(accX);
+
+    float roll = atan2(accX, accZ);
+    float pitch = atan2(-accX, sqrtf((accY * accY) + (accZ * accZ)));
+
+    float roll_degrees = roll * (180/M_PI);
+    float pitch_degrees = pitch * (180/M_PI);
+
+
+    Serial.print(roll_degrees);
     Serial.print(",");
-    Serial.print(accY);
-    Serial.print(",");
-    Serial.print(accZ);
+    Serial.print(pitch_degrees);
     Serial.print(",");
     Serial.print(gyrX);
     Serial.print(",");
