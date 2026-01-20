@@ -4,29 +4,25 @@
 #include <cmath>
 
 #define BMI270_I2C_ADDR 0x68
-/*Can also be replaced with "contexpr byte BMI270_I2C_ADDR = 0x68" macros outdated for this use case???*/
 
-/*Hardware Abstraction Layer*/
-
+//HAL
 int8_t bmi2_i2c_read(uint8_t reg, uint8_t *data, uint32_t len, void *intf_ptr)
 {
-  /*Prep to send data to sensor at 0x68*/
+  // Prep to send data to sensor at 0x68
   Wire2.beginTransmission(BMI270_I2C_ADDR);
-  /*Tell sensor what register to read (eg. gyro x, accel y, mag y, etc...)*/
+  //T ell sensor what register to read (eg. gyro x, accel y, mag y, etc...)
   Wire2.write(reg);
-  /*FALSE = Doesn't release I2C bus but restarts transmission
-  if the error message isn't 0 (ACK) transmission failed*/
+  // FALSE = Doesn't release I2C bus but restarts transmission if the error message isn't 0 (ACK) transmission failed
   if (Wire2.endTransmission(false) != 0)
     return BMI2_E_COM_FAIL;
-
-  /*Set length of byte so send from address*/
+  // Set length of byte so send from address
   Wire2.requestFrom((uint8_t)BMI270_I2C_ADDR, (uint8_t)len);
-  /*Loop over data stream in length of bytes*/
+  // Loop over data stream in length of bytes
   for (uint32_t i = 0; i < len && Wire2.available(); i++)
   {
     data[i] = Wire2.read();
   }
-  /*return 0 if everything works*/
+  //return 0 if everything works
   return BMI2_OK;
 }
 
@@ -41,18 +37,17 @@ int8_t bmi2_i2c_write(uint8_t reg, const uint8_t *data, uint32_t len, void *intf
   return (Wire2.endTransmission() == 0) ? BMI2_OK : BMI2_E_COM_FAIL;
 }
 
-// THIS DOESN'T COMPILE, FIX THIS SOON!!!!!!!!!
 void bmi2_delay_us(uint32_t period_us, void *intf_ptr)
 {
   (void) intf_ptr;
   delayMicroseconds(period_us);
 }
 
-/*Bosch objects*/
+//Bosch objects
 struct bmi2_dev bmi;
 struct bmi2_sens_data sensor_data;
 
-/*Init LFP class*/
+//Init LPF class
 ButterworthLPF accX_LPF;
 ButterworthLPF accY_LPF;
 ButterworthLPF accZ_LPF;
@@ -61,23 +56,30 @@ ButterworthLPF gyrX_LPF;
 ButterworthLPF gyrY_LPF;
 ButterworthLPF gyrZ_LPF;
 
-// dt last time variable
+// GLOBAL VARIBALES Accessed by loop() and setup()
+
+// dt last time variable global
 unsigned long prev_time = 0;
 
-// Gyro States
+// Gyro States for integration
 float gyr_pitch = 0;
 float gyr_roll = 0;
 float gyr_yaw = 0;
 
-/*Teensy Init*/
+// Complementary filter states for pitch and roll (also set weight)
+float a = 0.5;
+float fused_pitch_angle;
+float fused_roll_angle;
+
 void setup()
 {
+  // Serial comms setup
   Serial.begin(921600);
   while (!Serial);
-  Serial.println("t_us,ax,ay,az,gx,gy,gz");
   Wire2.begin();
   Wire2.setClock(400000);
 
+  // Sensor init from Bosch objects
   bmi.intf = BMI2_I2C_INTF;
   bmi.read = bmi2_i2c_read;
   bmi.write = bmi2_i2c_write;
@@ -111,10 +113,11 @@ void setup()
   uint8_t sens_list[2] = {BMI2_ACCEL, BMI2_GYRO};
   bmi270_sensor_enable(sens_list, 2, &bmi);
 
-  // Low pass filtering
+  // Low pass cutoffs
   float accFc = 10.0;
   float gyrFc = 5.0;
 
+  // Init once in setup, not global
   initButterworthLPF(&accX_LPF, accFc, 200.0f);
   initButterworthLPF(&accY_LPF, accFc, 200.0f);
   initButterworthLPF(&accZ_LPF, accFc, 200.0f);
@@ -126,14 +129,19 @@ void setup()
   // Prev time init
   prev_time = micros();
 
+  // Complementary states init CHECK IF I NEED THESE INIT IN setup()???
+  //float fused_pitch_angle = 0;
+  //float fused_roll_angle = 0;
+
 }
 
-/*Get Data*/
+// While looping the raw data by line is in this order!!! --> ax,ay,az,gx,gy,gz
+// Serial prints are --> acc pitch, acc roll, gyr pitch, gyr roll, gyr yaw, fused pitch, fused roll
 void loop()
 {
   if (bmi2_get_sensor_data(&sensor_data, &bmi) == BMI2_OK){
 
-    //dt calculation
+    //dt calculation in seconds
     unsigned long current_time = micros();
     float dt = (current_time - prev_time) * 1e-6;
     prev_time = current_time;
@@ -142,7 +150,7 @@ void loop()
     float g_per_lsb = 4.0f / 32768.0f;      
     float dps_per_lsb = 500.0f / 32768.0f;
 
-    //Get raw data and convert to Gs for accel and deg./sec. 
+    //Get raw data and convert to Gs for accel and deg./sec. for gyro
     float ax = sensor_data.acc.x * g_per_lsb;
     float ay = sensor_data.acc.y * g_per_lsb;
     float az = sensor_data.acc.z * g_per_lsb;
@@ -157,10 +165,9 @@ void loop()
     float gyrY = processButterworthLPF(&gyrY_LPF, gy);
     float gyrZ = processButterworthLPF(&gyrZ_LPF, gz);
 
-    //Accel to pitch and roll instead of raw Gs 
+    //Accel to pitch and roll in degrees instead of raw Gs 
     float roll = atan2(accX, accZ);
     float pitch = atan2(-accX, sqrtf((accY * accY) + (accZ * accZ)));
-
     float roll_degrees = roll * (180/M_PI);
     float pitch_degrees = pitch * (180/M_PI);
 
@@ -169,7 +176,12 @@ void loop()
     gyr_pitch += gyrY * dt;
     gyr_yaw += gyrZ * dt;
 
-    /* Use for raw data only
+    // Complementary filtering calculation
+    fused_pitch_angle += a * (fused_pitch_angle + gyrY * dt) + (1 - a) * pitch_degrees;
+    fused_roll_angle += a * (fused_roll_angle + gyrX * dt) + (1 - a) * roll_degrees;
+
+    // Use for raw data only, just in case :)
+    /* 
     Serial.print(sensor_data.acc.x);
     Serial.print(",");
     Serial.print(sensor_data.acc.y);
@@ -187,11 +199,18 @@ void loop()
     Serial.print(",");
     Serial.print(pitch_degrees);
     Serial.print(",");
-    Serial.print(gyr_pitch);  // Check python for variables / change them to pitch, roll, yaw
+    Serial.print(gyr_pitch);
     Serial.print(",");
     Serial.print(gyr_roll);
     Serial.print(",");
-    Serial.println(gyr_yaw);
+    Serial.print(gyr_yaw);
+    Serial.print(",");
+    Serial.print(fused_pitch_angle);
+    Serial.print(",");
+    Serial.println(fused_roll_angle);
+  }
+  else{
+    Serial.println("ERROR - sensor data read failed in 'loop()'");
   }
 
   delay(5); //200hz
